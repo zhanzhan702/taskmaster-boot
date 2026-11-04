@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  namespace 必须与 Mapper 接口的全限定名一致，
+  MyBatis 才能把这里的 <select id="..."> 和接口方法对应起来。
+-->
+<mapper namespace="cn.edu.mju.task.mapper.TaskMapper">
+
+    <!-- 列名集中定义，避免在多条语句里重复书写 -->
+    <sql id="Base_Column_List">
+        id, title, status, priority, due_date, create_date
+    </sql>
+
+    <!--
+    查询全部。
+    虽然开启了驼峰映射（due_date → dueDate），这里仍写一份 resultMap，
+    目的是让"列 ↔ 属性"的对应关系显式可见，便于后续加字段时集中维护。
+    -->
+    <resultMap id="TaskMap" type="Task">
+        <id     property="id"         column="id"/>
+        <result property="title"      column="title"/>
+        <result property="status"     column="status"/>
+        <result property="priority"   column="priority"/>
+        <result property="dueDate"    column="due_date"/>
+        <result property="createDate" column="create_date"/>
+    </resultMap>
+
+    <select id="findAll" resultMap="TaskMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM t_task
+        ORDER BY id
+    </select>
+
+    <!--
+    新增。
+    useGeneratedKeys + keyProperty：插入后把自增主键回填到 Task.id。
+    对比实验二：那里要手工 openStatement(RETURN_GENERATED_KEYS) 再取 ResultSet，
+    这里一个属性就够 —— 这是 MyBatis 抹掉的样板之一。
+    create_date 不写，依赖数据库列默认值 CURRENT_DATE。
+    -->
+    <insert id="insert" parameterType="Task" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO t_task (title, status, priority, due_date)
+        VALUES (#{title}, #{status}, #{priority}, #{dueDate})
+    </insert>
+
+    <update id="update" parameterType="Task">
+        UPDATE t_task
+        SET title    = #{title},
+            status   = #{status},
+            priority = #{priority},
+            due_date = #{dueDate}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

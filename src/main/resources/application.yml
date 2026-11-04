@@ -1,0 +1,79 @@
+# ============================================================================
+# TaskMaster · SpringBoot 版主配置
+# ============================================================================
+#
+# 实验四环节一/二的核心产物：
+#   实验三那四份 XML（web.xml / applicationContext.xml / spring-mvc.xml /
+#   mybatis-config.xml）在这里全部消失，其职责被"自动配置 + 本文件"接管。
+#
+# 结构约定：
+#   application.yml        公共配置 + 默认激活的 profile
+#   application-dev.yml    开发环境（本地库、DEBUG 日志）
+#   application-test.yml   测试环境（独立库、WARN 日志）
+#   application-prod.yml   生产环境（独立库、INFO 日志、连接池调优）
+#
+# 切换方式：
+#   java -jar taskmaster-boot.war --spring.profiles.active=test
+#   或 java -jar taskmaster-boot.war --spring.profiles.active=prod
+# ============================================================================
+
+server:
+  port: 8084
+  servlet:
+    # 打成 war 部署到外部 Tomcat 时，context-path 由 war 文件名决定；
+    # 用 java -jar 跑时可在此固定为根路径。
+    context-path: /
+    session:
+      timeout: 30m
+    encoding:
+      # 这一项取代了实验二/三手写的 EncodingFilter：
+      # Spring Boot 自动配置 CharacterEncodingFilter，force=true 对应原 Filter 的强制覆盖行为。
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  profiles:
+    # 默认开发环境；启动时用 --spring.profiles.active=xxx 覆盖
+    active: dev
+
+  application:
+    name: taskmaster-boot
+
+  mvc:
+    view:
+      # 取代实验三 spring-mvc.xml 里的 InternalResourceViewResolver
+      prefix: /WEB-INF/jsp/
+      suffix: .jsp
+
+  # 数据源：连接信息不再写死在代码或 XML 里，也不再需要 jdbc.properties
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 具体 url/username/password 由各 profile 覆盖
+    hikari:
+      # HikariCP 是 Spring Boot 2.x 默认连接池（实验二用的 DriverManager 直连，无池）
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+
+# MyBatis：取代实验三 mybatis-config.xml + SqlSessionFactoryBean 的三段配置
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: cn.edu.mju.task.entity
+  configuration:
+    # 取代 mybatis-config.xml 的 <setting name="mapUnderscoreToCamelCase" value="true"/>
+    map-underscore-to-camel-case: true
+    # 刻意不在这里配 log-impl：
+    #   log-impl 是"强制指定日志实现"，一旦写成 StdOutImpl 就会无视 logging.level 直接打印，
+    #   导致"prod 不打印 SQL"失效。交给 Boot 决定后，SQL 是否打印由
+    #   logging.level.cn.edu.mju.task.mapper 控制（dev=DEBUG 打印，prod=INFO 不打印）。
+
+# 业务参数：由 TaskProperties 绑定（环节二"业务参数一键隔离"）
+task:
+  system-name: TaskMaster
+  env-label: dev
+  welcome-message: 欢迎使用任务管理系统（开发环境）
+
+logging:
+  level:
+    root: INFO

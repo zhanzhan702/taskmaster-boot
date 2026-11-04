@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+    实验四：SpringBoot 快速迁移
+    Spring Boot 2.7.18 = Spring Framework 5.3.x + javax 命名空间 + JDK 8，
+    与实验二/实验三完全同一条技术线，因此 JSP 与既有代码可原样复用。
+    （Spring Boot 3.x 起基于 jakarta + JDK 17，与本次技术线不兼容。）
+  -->
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>2.7.18</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>cn.edu.mju.task</groupId>
+  <artifactId>taskmaster-boot</artifactId>
+  <version>1.0.0</version>
+  <!-- 必须是 war：Spring Boot 官方明确说明 JSP 不支持可执行 jar，
+       只支持 war（可用 java -jar app.war 运行，也可丢进外部 Tomcat）。 -->
+  <packaging>war</packaging>
+  <name>TaskMaster SpringBoot 版</name>
+
+  <properties>
+    <java.version>8</java.version>
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <mybatis.starter.version>2.3.2</mybatis.starter.version>
+    <jacoco.version>0.8.11</jacoco.version>
+  </properties>
+
+  <dependencies>
+    <!-- Web：MVC、内嵌 Tomcat、Jackson、校验（含自动配置） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- MyBatis：替代实验三里的 SqlSessionFactoryBean + MapperScannerConfigurer 手工配置；
+         starter 会根据 application.yml 的 spring.datasource.* 自动装配 SqlSessionFactory -->
+    <dependency>
+      <groupId>org.mybatis.spring.boot</groupId>
+      <artifactId>mybatis-spring-boot-starter</artifactId>
+      <version>${mybatis.starter.version}</version>
+    </dependency>
+
+    <!-- MySQL 驱动：Spring Boot 2.7.9 起改用新坐标 com.mysql:mysql-connector-j，
+         版本由 parent 的 dependencyManagement 统一管理，无需自己写 -->
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- JSP 引擎：Spring Boot 只为 Thymeleaf 提供 starter，JSP 必须自己引入 jasper -->
+    <dependency>
+      <groupId>org.apache.tomcat.embed</groupId>
+      <artifactId>tomcat-embed-jasper</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- 内嵌 Tomcat 设为 provided：这样既能 java -jar 跑 war，也能部署到外部 Tomcat 9 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-tomcat</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- 测试：JUnit 5 + Mockito + AssertJ + Spring Test（一个 starter 全含） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>taskmaster-boot</finalName>
+    <plugins>
+      <!-- 打可执行 war：java -jar target/taskmaster-boot.war 直接启动 -->
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+
+      <!-- 覆盖率度量（环节五）：mvn test 后生成 target/site/jacoco/index.html -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco.version}</version>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>test</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

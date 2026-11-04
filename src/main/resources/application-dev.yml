@@ -1,0 +1,22 @@
+# ============================================================================
+# dev —— 开发环境（默认激活）
+# 特点：连开发库、SQL 全量打印、日志 DEBUG，便于本地排查
+# 启动：无需额外参数（application.yml 里 spring.profiles.active 已设为 dev）
+# ============================================================================
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/taskmaster?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    username: root
+    password: fuzhanpeng602
+
+task:
+  system-name: TaskMaster（开发）
+  env-label: DEV
+  welcome-message: 欢迎使用任务管理系统 · 开发环境
+
+logging:
+  level:
+    root: INFO
+    # 开发环境把 Mapper 的 SQL 打到 DEBUG，方便看真实执行的语句
+    cn.edu.mju.task.mapper: DEBUG
