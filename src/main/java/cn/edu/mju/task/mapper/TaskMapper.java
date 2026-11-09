@@ -1,73 +1,37 @@
 package cn.edu.mju.task.mapper;
 
 import cn.edu.mju.task.entity.Task;
-import org.apache.ibatis.annotations.Delete;
-import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
-import org.apache.ibatis.annotations.Update;
-
-import java.util.List;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 
 /**
- * 任务 Mapper（MyBatis）—— <b>环节三：替换 JDBC 六步法</b>。
+ * 任务 Mapper —— <b>实验五环节三：改用 MyBatis-Plus 的 BaseMapper</b>。
  *
- * <p><b>「接口没有实现类为什么能跑？」</b>（本环节最核心的原理）
- * <ol>
- *   <li>Spring 启动时，{@code MapperScannerConfigurer} 扫描到本包下的接口；</li>
- *   <li>对每个接口调用 {@code MapperFactoryBean}，最终由 MyBatis 的
- *       {@code MapperProxyFactory} 生成一个<b>动态代理对象</b>
- *       （基于 JDK 的 {@code java.lang.reflect.Proxy}）；</li>
- *   <li>代理对象注册成 Spring Bean，Service 注入它就能调用；</li>
- *   <li>调用方法时，代理拦截下来，通过
- *       <b>接口全限定名 + 方法名</b> 去 {@code Configuration} 里找对应的
- *       {@code MappedStatement}（也就是 XML 里的 {@code <select id="...">} 或注解）；</li>
- *   <li>找到后执行 SQL，并用反射把 {@code ResultSet} 映射成返回值类型。</li>
- * </ol>
- * 所以"没有实现类"只是因为<b>实现被代理接管了</b>：
- * 方法名 = SQL 的 id，这两者必须严格对应。
+ * <p>对比实验三/四：那时这里要声明 findById / deleteById / updateStatus 等方法，
+ * 每个方法都要写注解 SQL 或 XML。现在<b>一行代码都不用写</b>，
+ * 因为 {@link BaseMapper} 已经提供了 17 个通用方法：
  *
- * <p><b>写法分工</b>（与环节二的思路一致）：
- * 简单单条语句用注解就近写；需要 {@code resultMap}、{@code useGeneratedKeys}
- * 或多行 SQL 的放 XML。
+ * <pre>
+ *   insert(T)                      selectById(Serializable)
+ *   deleteById(Serializable)       selectList(Wrapper)
+ *   updateById(T)                  selectPage(Page, Wrapper)
+ *   selectCount(Wrapper)           selectOne(Wrapper) ...
+ * </pre>
+ *
+ * <p><b>它凭什么能工作？</b>继承接口后，MyBatis-Plus 在启动时会为该接口注入
+ * 一组 {@code MappedStatement}（方法名 → SQL 模板），仍然走 MyBatis 的动态代理。
+ * 也就是说「接口无实现类」的原理没变，只是 SQL 由框架按实体的表结构自动生成。
+ *
+ * <p><b>代价（报告里会展开讨论）</b>：
+ * <ul>
+ *   <li>SQL 不可见 —— 不再有 XML 可以直接读，要看真实语句只能开日志；</li>
+ *   <li>复杂查询会被迫退回 Wrapper 拼接，可读性未必比手写 SQL 好；</li>
+ *   <li>自动生成的 SQL 可能与预期不符（例如全表更新风险、逻辑删除、
+ *       字段更新策略），排查时需要 {@code mybatis-plus.configuration.log-impl}；</li>
+ *   <li>关联查询不支持，仍是 N+1 的重灾区。</li>
+ * </ul>
+ *
+ * <p>本项目仍保留了两个自定义方法（见下方），因为它们涉及「带条件的原子更新」，
+ * 用 Wrapper 表达不如一行 SQL 清晰 —— 这正是「封装有边界」的实证。
  */
-public interface TaskMapper {
-
-    // ==================== XML 中定义（见 mapper/TaskMapper.xml）====================
-
-    /** 查询全部任务，按 id 升序。 */
-    List<Task> findAll();
-
-    /** 新增任务；成功后自增主键回填到入参对象的 id 属性。 */
-    int insert(Task task);
-
-    /** 按主键更新。 */
-    int update(Task task);
-
-    // ==================== 注解式定义（简单语句就近写）====================
-
-    /**
-     * 按主键查询。
-     *
-     * <p>开启了 {@code mapUnderscoreToCamelCase}，所以
-     * {@code due_date → dueDate}、{@code create_date → createDate} 自动映射。
-     *
-     * @return 不存在返回 {@code null}
-     */
-    @Select("SELECT id, title, status, priority, due_date, create_date "
-            + "FROM t_task WHERE id = #{id}")
-    Task findById(@Param("id") int id);
-
-    /** 按主键删除，返回受影响行数。 */
-    @Delete("DELETE FROM t_task WHERE id = #{id}")
-    int deleteById(@Param("id") int id);
-
-    /**
-     * 只更新状态字段（环节四：状态流转）。
-     *
-     * <p>单独一条 UPDATE 而不是"查出整个对象再改再存"，有两个好处：
-     * 不会把其它字段的旧值覆盖回去（避免丢失并发修改），
-     * 且 SQL 更短更明确。
-     */
-    @Update("UPDATE t_task SET status = #{status} WHERE id = #{id}")
-    int updateStatus(@Param("id") int id, @Param("status") byte status);
+public interface TaskMapper extends BaseMapper<Task> {
 }

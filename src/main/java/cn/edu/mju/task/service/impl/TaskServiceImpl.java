@@ -4,46 +4,50 @@ import cn.edu.mju.task.entity.Task;
 import cn.edu.mju.task.mapper.TaskMapper;
 import cn.edu.mju.task.service.ServiceException;
 import cn.edu.mju.task.service.TaskService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-
 /**
- * 任务业务实现 —— <b>环节三：数据访问由 JDBC DAO 换成 MyBatis Mapper</b>。
+ * 任务业务实现 —— <b>实验五：MyBatis-Plus 版</b>。
  *
- * <p>本类仍是<b>构造器注入</b>示范，只是注入的东西变了：
+ * <h3>分页与条件查询只用了一个方法</h3>
  * <pre>
- *   环节一：public TaskServiceImpl(TaskDao taskDao)        ← 自己写的 JDBC DAO
- *   环节三：public TaskServiceImpl(TaskMapper taskMapper)  ← MyBatis 动态代理
+ *   LambdaQueryWrapper&lt;Task&gt; qw = Wrappers.&lt;Task&gt;lambdaQuery()
+ *           .like(有标题, Task::getTitle, title)     // 动态拼条件
+ *           .eq(有状态, Task::getStatus, status)
+ *           .orderByAsc(Task::getId);
+ *   Page&lt;Task&gt; page = new Page&lt;&gt;(pageNum, pageSize);
+ *   taskMapper.selectPage(page, qw);                  // 一条语句拿到数据 + 总数
  * </pre>
- * 值得注意：<b>业务逻辑一行都没改</b>，改的只是依赖的类型。
- * 这正是"面向接口 + 依赖注入"的价值 —— 换持久化技术不影响业务层。
  *
- * <p>异常也变干净了：{@code TaskMapper} 不抛 {@code SQLException}
- * （MyBatis-Spring 会把底层异常翻译成 Spring 的 {@link DataAccessException}），
- * 所以这里只需捕获运行时异常，不必再写受检异常处理 —— 呼应痛点清单第 7 条。
+ * <p>对比实验三：那里要手写两条 SQL（{@code findByQuery} + {@code countByQuery}），
+ * 还要额外抽一个 {@code <sql>} 片段保证两处条件一致，否则总页数会算错。
+ * 现在 COUNT 由分页插件自动生成，<b>口径不一致的风险从「靠人保证」变成「结构上不可能」</b>。
+ *
+ * <h3>但请同时注意它的代价（报告里会展开）</h3>
+ * <ul>
+ *   <li><b>SQL 不可见</b>：代码里看不到 {@code LIMIT}，也看不到 {@code SELECT COUNT(*)}；</li>
+ *   <li>分页插件会<b>改写</b>你写的 SQL —— 排查慢查询时看到的语句与代码对不上；</li>
+ *   <li>{@code .like()} 的模糊匹配由 {@code <if>} 动态拼装，条件为空时会静默忽略，
+ *       写错字段名也只有运行到才报错。</li>
+ * </ul>
  */
 @Service
 public class TaskServiceImpl implements TaskService {
 
-    /** 构造器注入 → final，创建后不可变。 */
+    /** 标题最大长度，与表结构 varchar(255) 对齐。 */
+    private static final int TITLE_MAX_LENGTH = 255;
+
+    /** 每页条数上限，防止 URL 传 pageSize=999999 把整表拉进内存。 */
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final TaskMapper taskMapper;
 
-    /**
-     * 构造器注入（实验四：改由注解驱动）。
-     *
-     * <p>实验三时这个 Bean 是在 {@code applicationContext.xml} 里用
-     * {@code <constructor-arg ref="taskMapper"/>} 声明的；
-     * 迁移到 SpringBoot 后 XML 没了，改为：
-     * <ul>
-     *   <li>{@code @Service} 让组件扫描发现本类；</li>
-     *   <li>类上只有<b>一个</b>构造器，Spring 4.3+ 会<b>隐式</b>按类型注入其参数，
-     *       连 {@code @Autowired} 都可以省略。</li>
-     * </ul>
-     * 依赖仍是 {@code final} —— 构造器注入的性质没有因为换配置方式而改变。
-     */
     public TaskServiceImpl(TaskMapper taskMapper) {
         if (taskMapper == null) {
             throw new IllegalArgumentException("taskMapper 不能为 null");
@@ -52,9 +56,33 @@ public class TaskServiceImpl implements TaskService {
     }
 
     @Override
-    public List<Task> findAll() {
+    public IPage<Task> search(String title, Byte status, int pageNum, int pageSize) {
+        // 修正分页参数：来自 URL 的值不可信
+        if (pageNum < 1) {
+            pageNum = 1;
+        }
+        if (pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
+            pageSize = 10;
+        }
+
+        String keyword = (title == null) ? null : title.trim();
+
+        // 条件构造器：第一个布尔参数为 false 时，该条件整体不参与 SQL
+        // —— 这就是「动态 SQL」在 MyBatis-Plus 里的表达方式，不必再写 <if>
+        LambdaQueryWrapper<Task> qw = Wrappers.<Task>lambdaQuery()
+                .like(keyword != null && !keyword.isEmpty(), Task::getTitle, keyword)
+                .eq(status != null, Task::getStatus, status)
+                .orderByAsc(Task::getId);
+
+        Page<Task> page = new Page<Task>(pageNum, pageSize);
         try {
-            return taskMapper.findAll();
+            IPage<Task> result = taskMapper.selectPage(page, qw);
+            // 页码越界（例如删光了最后一页）时回退到最后一页，避免用户看到空白页
+            if (result.getTotal() > 0 && pageNum > result.getPages()) {
+                Page<Task> last = new Page<Task>(result.getPages(), pageSize);
+                return taskMapper.selectPage(last, qw);
+            }
+            return result;
         } catch (DataAccessException e) {
             throw new ServiceException("查询任务列表失败", e);
         }
@@ -63,7 +91,7 @@ public class TaskServiceImpl implements TaskService {
     @Override
     public Task findById(int id) {
         try {
-            return taskMapper.findById(id);
+            return taskMapper.selectById(id);
         } catch (DataAccessException e) {
             throw new ServiceException("查询任务失败, id=" + id, e);
         }
@@ -89,7 +117,7 @@ public class TaskServiceImpl implements TaskService {
             throw new ServiceException("更新任务时必须提供 id");
         }
         try {
-            int rows = taskMapper.update(task);
+            int rows = taskMapper.updateById(task);
             if (rows == 0) {
                 throw new ServiceException("要修改的任务不存在, id=" + task.getId());
             }
@@ -110,28 +138,9 @@ public class TaskServiceImpl implements TaskService {
         }
     }
 
-    /**
-     * 任务状态流转（环节四新增）—— <b>声明式事务的落点</b>。
-     *
-     * <p>{@code @Transactional} 的效果：本方法被 Spring 用 AOP 代理包了一层，
-     * 进入方法前开启事务（autoCommit=false），正常返回则 commit，
-     * 抛出 RuntimeException 则 rollback。业务代码里看不到任何
-     * {@code setAutoCommit / commit / rollback} —— 这就是"声明式"的含义。
-     *
-     * <p><b>为什么这个场景真的需要事务</b>：
-     * <pre>
-     *   SELECT status ...   ← 读到"待办(0)"
-     *        （此刻另一个请求把它改成了"进行中(1)"）
-     *   UPDATE ... status=1 ← 覆盖别人的修改，业务规则被绕过
-     * </pre>
-     * 把两步放进同一个事务，配合合适的隔离级别（如 REPEATABLE READ）
-     * 能让"读到的值"与"更新的值"保持一致，避免这类竞态。
-     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(int id, String action) {
-        // 与其它方法保持一致：把底层 DataAccessException 统一翻译成 ServiceException，
-        // 这样 Web 层只需面对一种业务异常（否则"数据库宕机"时会漏出技术细节）。
         try {
             doChangeStatus(id, action);
         } catch (DataAccessException e) {
@@ -139,9 +148,8 @@ public class TaskServiceImpl implements TaskService {
         }
     }
 
-    /** 状态流转的实际逻辑：查当前状态 → 校验是否允许 → 更新。 */
     private void doChangeStatus(int id, String action) {
-        Task task = taskMapper.findById(id);
+        Task task = taskMapper.selectById(id);
         if (task == null) {
             throw new ServiceException("任务不存在, id=" + id);
         }
@@ -170,9 +178,14 @@ public class TaskServiceImpl implements TaskService {
             throw new ServiceException("未知的状态操作: " + action);
         }
 
-        int rows = taskMapper.updateStatus(id, next);
+        // 只更新 status 一个字段：用 updateById 会带上全部非空字段，
+        // 因此这里构造一个只含 id + status 的临时对象，语义更精确
+        Task patch = new Task();
+        patch.setId(Integer.valueOf(id));
+        patch.setStatus(Byte.valueOf(next));
+
+        int rows = taskMapper.updateById(patch);
         if (rows != 1) {
-            // 抛异常 → 事务回滚（虽然这里只更新了一行，但语义上必须一致）
             throw new ServiceException("状态更新失败，受影响行数为 " + rows);
         }
     }
@@ -185,8 +198,8 @@ public class TaskServiceImpl implements TaskService {
         if (task.getTitle() == null || task.getTitle().trim().isEmpty()) {
             throw new ServiceException("任务名称不能为空");
         }
-        if (task.getTitle().trim().length() > 255) {
-            throw new ServiceException("任务名称长度不能超过 255 个字符");
+        if (task.getTitle().trim().length() > TITLE_MAX_LENGTH) {
+            throw new ServiceException("任务名称长度不能超过 " + TITLE_MAX_LENGTH + " 个字符");
         }
         if (task.getPriority() == null || task.getPriority().byteValue() < 1 || task.getPriority().byteValue() > 3) {
             throw new ServiceException("优先级取值应为 1~3");

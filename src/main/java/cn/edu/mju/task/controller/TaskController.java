@@ -2,9 +2,10 @@ package cn.edu.mju.task.controller;
 
 import cn.edu.mju.task.config.TaskProperties;
 import cn.edu.mju.task.entity.Task;
+import cn.edu.mju.task.form.TaskForm;
 import cn.edu.mju.task.service.ServiceException;
 import cn.edu.mju.task.service.TaskService;
-import cn.edu.mju.task.util.WebUtil;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.validation.BindingResult;
@@ -16,37 +17,31 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
-import java.util.List;
+import javax.validation.Valid;
 
 /**
- * 任务控制器 —— <b>环节四：整合 SSM，把全部 CRUD 与状态流转收进一个 @Controller</b>。
- *
- * <p>实验二时这些功能分散在 4 个 Servlet 里，每个都要在 web.xml 注册。
- * 现在一个类就装下了 7 个端点，路由写在方法注解上，新增功能不必动配置。
+ * 任务控制器 —— <b>实验五：Thymeleaf 视图 + MyBatis-Plus 分页 + @Valid 校验</b>。
  *
  * <h3>路由一览</h3>
  * <table border="1">
  *   <tr><th>方法</th><th>URL</th><th>作用</th><th>返回</th></tr>
- *   <tr><td>GET</td><td>/task/list</td><td>列表</td><td>转发到 list.jsp</td></tr>
- *   <tr><td>GET</td><td>/task/add</td><td>新增表单</td><td>转发到 add.jsp</td></tr>
- *   <tr><td>POST</td><td>/task/add</td><td>提交新增</td><td>重定向（PRG）</td></tr>
- *   <tr><td>GET</td><td>/task/edit/{id}</td><td>修改表单</td><td>转发到 edit.jsp</td></tr>
- *   <tr><td>POST</td><td>/task/edit/{id}</td><td>提交修改</td><td>重定向（PRG）</td></tr>
- *   <tr><td>POST</td><td>/task/delete/{id}</td><td>删除</td><td>重定向（PRG）</td></tr>
- *   <tr><td>POST</td><td>/task/status/{id}</td><td>状态流转</td><td>重定向（PRG）</td></tr>
+ *   <tr><td>GET</td><td>/task/list</td><td>条件查询 + 分页列表</td><td>list.html</td></tr>
+ *   <tr><td>GET</td><td>/task/add</td><td>新增表单</td><td>add.html</td></tr>
+ *   <tr><td>POST</td><td>/task/add</td><td>提交新增（@Valid）</td><td>重定向 / 回表单</td></tr>
+ *   <tr><td>GET</td><td>/task/edit/{id}</td><td>修改表单</td><td>edit.html</td></tr>
+ *   <tr><td>POST</td><td>/task/edit/{id}</td><td>提交修改（@Valid）</td><td>重定向 / 回表单</td></tr>
+ *   <tr><td>POST</td><td>/task/delete/{id}</td><td>删除</td><td>重定向</td></tr>
+ *   <tr><td>POST</td><td>/task/status/{id}</td><td>状态流转</td><td>重定向</td></tr>
  * </table>
  *
- * <h3>相比原生 Servlet 的四处改进</h3>
+ * <h3>三个与实验四不同的点</h3>
  * <ol>
- *   <li><b>路径变量</b>：{@code /task/edit/{id}} 取代 {@code ?id=} 与隐藏域，
- *       id 写在 URL 里，语义清晰；</li>
- *   <li><b>自动绑定</b>：{@code @ModelAttribute} 按参数名把表单装进 Task，
- *       日期靠 {@code @DateTimeFormat} 自动转换，不再手工 getParameter + parse；</li>
- *   <li><b>Flash 属性</b>：{@code RedirectAttributes.addFlashAttribute}
- *       让提示消息跨过一次重定向后自动消失，
- *       不必再拼 {@code ?msg=added}（呼应痛点清单第 9 条）；</li>
- *   <li><b>方法级路由</b>：GET/POST 由注解区分，GET 访问只接受 POST 的端点
- *       自动返回 405，不用手写 doGet 报错。</li>
+ *   <li><b>不再用 {@code @ModelAttribute Task}</b>，改用表单对象 {@link TaskForm}。
+ *       实体上有 id/createDate 这类用户不该提交的字段，用表单对象可以精确控制可绑定字段，
+ *       配合 {@code @Valid} 才能做到「只校验用户真正提交的内容」。</li>
+ *   <li><b>校验失败时不再手工拼错误字符串</b>：{@code BindingResult} 会带着每个字段的错误，
+ *       模板用 {@code th:errors} 逐字段展示，错误提示就显示在对应输入框下方。</li>
+ *   <li><b>分页参数由 Service 修正</b>，控制器只负责把 {@code IPage} 放进模型。</li>
  * </ol>
  */
 @Controller
@@ -57,17 +52,18 @@ public class TaskController {
     private static final String VIEW_ADD = "add";
     private static final String VIEW_EDIT = "edit";
 
-    private static final String ATTR_TASKS = "tasks";
-    private static final String ATTR_TASK = "task";
+    private static final String ATTR_PAGE = "page";
+    private static final String ATTR_FORM = "form";
     private static final String ATTR_MSG = "msg";
-    private static final String ATTR_ERROR = "error";
+    private static final String ATTR_TITLE = "queryTitle";
+    private static final String ATTR_STATUS = "queryStatus";
 
     private static final String REDIRECT_LIST = "redirect:/task/list";
 
-    /** 业务对象：控制器由 Spring 创建，因此可直接构造器注入。 */
-    private final TaskService taskService;
+    /** 每页条数（演示用，固定 5 条，便于看到翻页效果）。 */
+    private static final int PAGE_SIZE = 5;
 
-    /** 业务参数（实验四环节二）：页面右上角显示当前环境标识。 */
+    private final TaskService taskService;
     private final TaskProperties taskProperties;
 
     public TaskController(TaskService taskService, TaskProperties taskProperties) {
@@ -75,31 +71,65 @@ public class TaskController {
         this.taskProperties = taskProperties;
     }
 
-    // ==================== 查询 ====================
+    // ==================== 查询 + 分页 ====================
 
     /**
-     * 任务列表 —— <b>"查询用转发"</b>。
+     * 条件查询 + 分页。
      *
-     * <p>返回逻辑视图名，由 ViewResolver 拼成 /WEB-INF/jsp/list.jsp 并转发，
-     * 地址栏保持 /task/list 不变；刷新只会重新查询，不产生副作用。
+     * <p>参数一律用 {@code String} 接收再宽松解析：{@code page=abc} 或 {@code status=99}
+     * 这类手改 URL 的情况不应让用户撞上 400 错误页，而应回退到「第 1 页 / 全部状态」。
      */
     @GetMapping("/list")
-    public String list(@RequestParam(name = "msg", required = false) String msg, Model model) {
-        List<Task> tasks = taskService.findAll();
-        model.addAttribute(ATTR_TASKS, tasks);
+    public String list(@RequestParam(name = "title", required = false) String title,
+                       @RequestParam(name = "status", required = false) String status,
+                       @RequestParam(name = "page", required = false) String page,
+                       Model model) {
 
-        // 环境标识：切 profile 后这里会变，用于肉眼确认当前连的是哪个环境
+        String keyword = (title == null) ? "" : title.trim();
+        Byte statusValue = parseStatus(status);
+        int pageNum = parsePage(page);
+
+        IPage<Task> result = taskService.search(keyword, statusValue, pageNum, PAGE_SIZE);
+
+        // 页码窗口在 Java 里算好再交给模板。
+        // 不要在 Thymeleaf 里写 T(java.lang.Math).max(1, page.current - 2)：
+        // page.current 是 Long，而字面量 1 是 Integer，SpEL 解析重载时会抛
+        // 「Method call of 'max' is ambiguous」，且报错发生在渲染阶段、页面只看到 500。
+        int pages = (int) result.getPages();
+        int current = (int) result.getCurrent();
+        model.addAttribute("pageFrom", Math.max(1, current - 2));
+        model.addAttribute("pageTo", Math.min(Math.max(pages, 1), current + 2));
+
+        model.addAttribute(ATTR_PAGE, result);
+        model.addAttribute(ATTR_TITLE, keyword);
+        model.addAttribute(ATTR_STATUS, statusValue);
         model.addAttribute("envLabel", taskProperties.getEnvLabel());
         model.addAttribute("systemName", taskProperties.getSystemName());
-
-        // 兼容旧的 ?msg= 直链（Flash 属性会以模型属性的形式自动出现在 model 里）
-        if (msg != null && !msg.isEmpty() && !model.containsAttribute(ATTR_MSG)) {
-            String text = resolveMsg(WebUtil.trim(msg));
-            if (text != null) {
-                model.addAttribute(ATTR_MSG, text);
-            }
-        }
+        model.addAttribute("pageSize", PAGE_SIZE);
         return VIEW_LIST;
+    }
+
+    private static int parsePage(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return 1;
+        }
+        try {
+            return Math.max(Integer.parseInt(raw.trim()), 1);
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
+
+    private static Byte parseStatus(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            byte v = Byte.parseByte(raw.trim());
+            return (v >= 0 && v <= 2) ? Byte.valueOf(v) : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     // ==================== 新增 ====================
@@ -107,44 +137,48 @@ public class TaskController {
     /** 显示新增表单。 */
     @GetMapping("/add")
     public String addForm(Model model) {
-        Task task = new Task();
-        task.setTitle("");
-        task.setStatus(Byte.valueOf((byte) 0));
-        task.setPriority(Byte.valueOf((byte) 1));
-        model.addAttribute(ATTR_TASK, task);
+        TaskForm form = new TaskForm();
+        form.setStatus(Byte.valueOf((byte) 0));
+        form.setPriority(Byte.valueOf((byte) 1));
+        model.addAttribute(ATTR_FORM, form);
         return VIEW_ADD;
     }
 
     /**
-     * 提交新增（PRG：成功后重定向，刷新不会重复插入）。
+     * 提交新增。
      *
-     * <p>{@code @ModelAttribute} 会自动把 {@code title / status / priority / dueDate}
-     * 按名字绑到 Task 上；{@link BindingResult} 必须紧跟其后，
-     * 否则类型转换失败会直接抛 400 而不会进方法。
+     * <p>{@code @Valid} 触发 TaskForm 上的 JSR-303 校验，结果写入紧随其后的
+     * {@link BindingResult}。注意 BindingResult <b>必须紧跟</b>在被校验对象之后，
+     * 否则 Spring 会认为没有接收错误、直接抛 400。
+     *
+     * <p>校验通过后再由 Service 做业务校验（例如「标题恰好 255 字」这类与表结构相关的规则），
+     * 两层校验的分工是：<b>@Valid 管「格式与必填」，Service 管「业务规则」</b>。
      */
     @PostMapping("/add")
-    public String add(@ModelAttribute(ATTR_TASK) Task task,
+    public String add(@Valid @ModelAttribute(ATTR_FORM) TaskForm form,
                       BindingResult binding,
                       Model model,
                       RedirectAttributes redirectAttributes) {
 
-        String error = firstError(binding);
-        if (error == null) {
-            try {
-                taskService.add(task);
-                redirectAttributes.addFlashAttribute(ATTR_MSG, "新增成功");
-                return REDIRECT_LIST;
-            } catch (ServiceException e) {
-                error = e.getMessage();
-            }
+        if (binding.hasErrors()) {
+            // 模板用 th:errors 逐字段回显错误，这里不需要拼任何提示文本
+            return VIEW_ADD;
         }
-        model.addAttribute(ATTR_ERROR, error);
-        return VIEW_ADD;
+
+        try {
+            taskService.add(toTask(form));
+            redirectAttributes.addFlashAttribute(ATTR_MSG, "新增成功");
+            return REDIRECT_LIST;
+        } catch (ServiceException e) {
+            // 业务校验失败：把提示挂到整个表单上（模板里的 formError 区域）
+            model.addAttribute("formError", e.getMessage());
+            return VIEW_ADD;
+        }
     }
 
     // ==================== 修改 ====================
 
-    /** 显示修改表单；id 来自路径变量。 */
+    /** 显示修改表单。 */
     @GetMapping("/edit/{id}")
     public String editForm(@PathVariable("id") int id,
                            Model model,
@@ -154,42 +188,38 @@ public class TaskController {
             redirectAttributes.addFlashAttribute(ATTR_MSG, "任务不存在或已被删除");
             return REDIRECT_LIST;
         }
-        model.addAttribute(ATTR_TASK, task);
+        model.addAttribute(ATTR_FORM, toForm(task));
         return VIEW_EDIT;
     }
 
     /** 提交修改。 */
     @PostMapping("/edit/{id}")
     public String edit(@PathVariable("id") int id,
-                       @ModelAttribute(ATTR_TASK) Task task,
+                       @Valid @ModelAttribute(ATTR_FORM) TaskForm form,
                        BindingResult binding,
                        Model model,
                        RedirectAttributes redirectAttributes) {
 
-        task.setId(Integer.valueOf(id));
-
-        String error = firstError(binding);
-        if (error == null) {
-            try {
-                taskService.update(task);
-                redirectAttributes.addFlashAttribute(ATTR_MSG, "修改成功");
-                return REDIRECT_LIST;
-            } catch (ServiceException e) {
-                error = e.getMessage();
-            }
+        form.setId(Integer.valueOf(id));
+        if (binding.hasErrors()) {
+            return VIEW_EDIT;
         }
-        model.addAttribute(ATTR_ERROR, error);
-        return VIEW_EDIT;
+
+        try {
+            Task task = toTask(form);
+            task.setId(Integer.valueOf(id));
+            taskService.update(task);
+            redirectAttributes.addFlashAttribute(ATTR_MSG, "修改成功");
+            return REDIRECT_LIST;
+        } catch (ServiceException e) {
+            model.addAttribute("formError", e.getMessage());
+            return VIEW_EDIT;
+        }
     }
 
     // ==================== 删除 ====================
 
-    /**
-     * 删除（仅 POST）。
-     *
-     * <p>只写 {@code @PostMapping}，用 GET 访问会由 Spring 自动返回
-     * <b>405 Method Not Allowed</b>，不必再手写 doGet 报错。
-     */
+    /** 删除（仅 POST；用 GET 访问会由 Spring 返回 405）。 */
     @PostMapping("/delete/{id}")
     public String delete(@PathVariable("id") int id, RedirectAttributes redirectAttributes) {
         try {
@@ -203,12 +233,7 @@ public class TaskController {
 
     // ==================== 状态流转 ====================
 
-    /**
-     * 状态流转：{@code action} 取值 start / complete / reopen。
-     *
-     * <p>合法性校验（当前状态是否允许该操作）在 Service 层，且该方法带事务，
-     * 保证"查状态 → 判合法 → 改状态"两步的原子性。
-     */
+    /** 状态流转：action 取值 start / complete / reopen。 */
     @PostMapping("/status/{id}")
     public String changeStatus(@PathVariable("id") int id,
                                @RequestParam("action") String action,
@@ -224,40 +249,22 @@ public class TaskController {
 
     // ==================== 辅助 ====================
 
-    /** 把绑定错误翻译成一句可读提示。 */
-    private String firstError(BindingResult binding) {
-        if (binding == null || !binding.hasErrors()) {
-            return null;
-        }
-        if (binding.hasFieldErrors("dueDate")) {
-            return "截止日期格式应为 yyyy-MM-dd";
-        }
-        if (binding.hasFieldErrors("priority")) {
-            return "优先级取值应为 1~3";
-        }
-        if (binding.hasFieldErrors("status")) {
-            return "任务状态取值应为 0~2";
-        }
-        return "表单内容格式不正确，请检查后重新提交";
+    private static Task toTask(TaskForm form) {
+        Task task = new Task();
+        task.setTitle(form.getTitle() == null ? null : form.getTitle().trim());
+        task.setStatus(form.getStatus());
+        task.setPriority(form.getPriority());
+        task.setDueDate(form.getDueDate());
+        return task;
     }
 
-    /** 把消息代码翻译成中文提示（兼容旧链接）。 */
-    private String resolveMsg(String code) {
-        if (code == null) {
-            return null;
-        }
-        if ("added".equals(code)) {
-            return "新增成功";
-        }
-        if ("updated".equals(code)) {
-            return "修改成功";
-        }
-        if ("deleted".equals(code)) {
-            return "删除成功";
-        }
-        if ("notfound".equals(code)) {
-            return "任务不存在或已被删除";
-        }
-        return null;
+    private static TaskForm toForm(Task task) {
+        TaskForm form = new TaskForm();
+        form.setId(task.getId());
+        form.setTitle(task.getTitle());
+        form.setStatus(task.getStatus());
+        form.setPriority(task.getPriority());
+        form.setDueDate(task.getDueDate());
+        return form;
     }
 }

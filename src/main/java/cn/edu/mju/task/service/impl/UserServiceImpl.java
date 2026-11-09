@@ -4,6 +4,7 @@ import cn.edu.mju.task.entity.User;
 import cn.edu.mju.task.mapper.UserMapper;
 import cn.edu.mju.task.service.ServiceException;
 import cn.edu.mju.task.service.UserService;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
@@ -52,7 +53,9 @@ public class UserServiceImpl implements UserService {
             return null;
         }
         try {
-            User user = userMapper.findByLoginName(loginName);
+            // 实验五：不再需要自定义 findByLoginName，一条等值查询用条件构造器表达
+            User user = userMapper.selectOne(
+                    Wrappers.<User>lambdaQuery().eq(User::getLoginName, loginName));
             if (user == null) {
                 return null;
             }

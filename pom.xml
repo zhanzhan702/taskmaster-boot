@@ -5,10 +5,16 @@
   <modelVersion>4.0.0</modelVersion>
 
   <!--
-    实验四：SpringBoot 快速迁移
-    Spring Boot 2.7.18 = Spring Framework 5.3.x + javax 命名空间 + JDK 8，
-    与实验二/实验三完全同一条技术线，因此 JSP 与既有代码可原样复用。
-    （Spring Boot 3.x 起基于 jakarta + JDK 17，与本次技术线不兼容。）
+    实验五：TaskMaster 的 SpringBoot 现代化与部署上线
+
+    与实验四的差异（本次改造的核心）：
+      1. 打包方式 war → **jar**。
+         实验四之所以只能用 war，是因为 JSP 在可执行 jar 里跑不起来
+         （Tomcat 对 jar 内 JSP 有硬编码路径限制）；本次改用 Thymeleaf，
+         模板从 classpath 读取，因此终于可以打成可执行 jar，实现真正的一键部署。
+      2. MyBatis → **MyBatis-Plus**（BaseMapper + 条件构造器 + 分页插件）
+      3. 新增 **spring-boot-starter-validation**（@Valid 服务端校验）
+      4. Thymeleaf 取代 JSP，因此移除 tomcat-embed-jasper 与 provided 的内嵌容器
   -->
   <parent>
     <groupId>org.springframework.boot</groupId>
@@ -19,11 +25,9 @@
 
   <groupId>cn.edu.mju.task</groupId>
   <artifactId>taskmaster-boot</artifactId>
-  <version>1.0.0</version>
-  <!-- 必须是 war：Spring Boot 官方明确说明 JSP 不支持可执行 jar，
-       只支持 war（可用 java -jar app.war 运行，也可丢进外部 Tomcat）。 -->
-  <packaging>war</packaging>
-  <name>TaskMaster SpringBoot 版</name>
+  <version>1.1.0</version>
+  <packaging>jar</packaging>
+  <name>TaskMaster SpringBoot 现代化版</name>
 
   <properties>
     <java.version>8</java.version>
@@ -31,48 +35,46 @@
     <maven.compiler.target>1.8</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-    <mybatis.starter.version>2.3.2</mybatis.starter.version>
+    <mybatis.plus.version>3.5.3.2</mybatis.plus.version>
     <jacoco.version>0.8.11</jacoco.version>
   </properties>
 
   <dependencies>
-    <!-- Web：MVC、内嵌 Tomcat、Jackson、校验（含自动配置） -->
+    <!-- Web：MVC、内嵌 Tomcat、Jackson -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
     </dependency>
 
-    <!-- MyBatis：替代实验三里的 SqlSessionFactoryBean + MapperScannerConfigurer 手工配置；
-         starter 会根据 application.yml 的 spring.datasource.* 自动装配 SqlSessionFactory -->
+    <!-- 环节二：Thymeleaf 模板引擎（取代 JSP）。
+         Spring Boot 为它提供 starter，模板放在 classpath:/templates/ 下，
+         因此可执行 jar 也能正常渲染 —— 这是能改打 jar 的前提。 -->
     <dependency>
-      <groupId>org.mybatis.spring.boot</groupId>
-      <artifactId>mybatis-spring-boot-starter</artifactId>
-      <version>${mybatis.starter.version}</version>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-thymeleaf</artifactId>
     </dependency>
 
-    <!-- MySQL 驱动：Spring Boot 2.7.9 起改用新坐标 com.mysql:mysql-connector-j，
-         版本由 parent 的 dependencyManagement 统一管理，无需自己写 -->
+    <!-- 环节四：Spring Validation（@Valid / @NotBlank / @Size / @Min / @Max） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <!-- 环节三：MyBatis-Plus（BaseMapper + LambdaQueryWrapper + 分页插件） -->
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-boot-starter</artifactId>
+      <version>${mybatis.plus.version}</version>
+    </dependency>
+
+    <!-- MySQL 驱动（坐标与版本由 parent 管理） -->
     <dependency>
       <groupId>com.mysql</groupId>
       <artifactId>mysql-connector-j</artifactId>
       <scope>runtime</scope>
     </dependency>
 
-    <!-- JSP 引擎：Spring Boot 只为 Thymeleaf 提供 starter，JSP 必须自己引入 jasper -->
-    <dependency>
-      <groupId>org.apache.tomcat.embed</groupId>
-      <artifactId>tomcat-embed-jasper</artifactId>
-      <scope>provided</scope>
-    </dependency>
-
-    <!-- 内嵌 Tomcat 设为 provided：这样既能 java -jar 跑 war，也能部署到外部 Tomcat 9 -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-tomcat</artifactId>
-      <scope>provided</scope>
-    </dependency>
-
-    <!-- 测试：JUnit 5 + Mockito + AssertJ + Spring Test（一个 starter 全含） -->
+    <!-- 测试：JUnit 5 + Mockito + AssertJ + Spring Test -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
@@ -81,15 +83,18 @@
   </dependencies>
 
   <build>
-    <finalName>taskmaster-boot</finalName>
+    <finalName>taskmaster-plus</finalName>
     <plugins>
-      <!-- 打可执行 war：java -jar target/taskmaster-boot.war 直接启动 -->
+      <!-- 打成可执行 jar：java -jar target/taskmaster-plus.jar -->
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <!-- 排除 lombok 之类无需打包的依赖可在此配置；本项目无 -->
+        </configuration>
       </plugin>
 
-      <!-- 覆盖率度量（环节五）：mvn test 后生成 target/site/jacoco/index.html -->
+      <!-- 覆盖率度量：mvn test 后生成 target/site/jacoco/index.html -->
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>

@@ -10,6 +10,12 @@ spring:
     username: root
     password: fuzhanpeng602
 
+# 只在开发环境把 MyBatis-Plus 生成的 SQL 打到控制台。
+# 这是排查「封装带来的代价」的唯一有效手段：代码里看不到 SQL，只能靠日志看它到底发了什么。
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
 task:
   system-name: TaskMaster（开发）
   env-label: DEV

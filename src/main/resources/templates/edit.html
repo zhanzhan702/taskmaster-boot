@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<!--
+  修改任务页 —— 与 add.html 的唯一差别是提交地址里带 id。
+  id 从 URL 路径变量取得（控制器已塞回 form.id），因此不需要隐藏域。
+-->
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>修改任务 · TaskMaster</title>
+    <style th:replace="~{fragments/style :: css}"></style>
+</head>
+<body>
+
+<div th:replace="~{fragments/task-form :: taskForm(${form}, ${'/task/edit/' + form.id}, '修改任务')}"></div>
+
+</body>
+</html>

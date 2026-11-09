@@ -1,23 +1,31 @@
 package cn.edu.mju.task.service;
 
 import cn.edu.mju.task.entity.Task;
-
-import java.util.List;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 
 /**
  * 任务业务接口。
  *
- * <p><b>环节一引入业务层的意义</b>：
- * 实验二里 Servlet 直接调 DAO，业务规则（标题非空、状态取值等）散落在 Servlet 与工具类中。
- * 现在把"业务规则"集中到这一层，Servlet 只负责接请求与选页面。
- *
- * <p>注意方法签名<b>不再</b> {@code throws SQLException} —— 底层技术异常已在实现里
- * 翻译成 {@link ServiceException}，上层不必感知持久化细节。
+ * <p>实验五的改动：
+ * <ul>
+ *   <li>{@code findAll()} → {@link #search(String, Byte, int, int)}：
+ *       支持<b>任务名称模糊 + 状态精确</b>的条件查询，并返回分页结果；</li>
+ *   <li>返回值用 MyBatis-Plus 的 {@link IPage}，它同时携带「当前页数据」与
+ *       「总数、总页数、当前页号」—— 模板里直接 {@code page.records} / {@code page.total} 即可。</li>
+ * </ul>
  */
 public interface TaskService {
 
-    /** 查询全部任务。 */
-    List<Task> findAll();
+    /**
+     * 条件查询 + 分页。
+     *
+     * @param title    任务名称关键字（模糊匹配，空则不参与筛选）
+     * @param status   任务状态（精确匹配，null 表示全部）
+     * @param pageNum  页码，从 1 开始；越界会被修正
+     * @param pageSize 每页条数
+     * @return 分页结果，永不为 null
+     */
+    IPage<Task> search(String title, Byte status, int pageNum, int pageSize);
 
     /** 按 id 查询；不存在返回 null。 */
     Task findById(int id);
@@ -32,22 +40,13 @@ public interface TaskService {
     void delete(int id);
 
     /**
-     * 任务状态流转（环节四新增）。
+     * 任务状态流转。
      *
-     * <p>规则：
-     * <table border="1">
-     *   <tr><th>action</th><th>允许的当前状态</th><th>流转结果</th></tr>
-     *   <tr><td>start</td><td>待办(0)</td><td>进行中(1)</td></tr>
-     *   <tr><td>complete</td><td>进行中(1)</td><td>已完成(2)</td></tr>
-     *   <tr><td>reopen</td><td>已完成(2)</td><td>进行中(1)</td></tr>
-     * </table>
+     * <p>规则：start(待办0→进行中1)、complete(进行中1→已完成2)、reopen(已完成2→进行中1)。
      *
-     * <p><b>为什么必须加事务</b>：本方法要"先查当前状态 → 校验是否允许 →
-     * 再更新"，两步之间如果并发有别人改了状态，校验就会失效
-     * （例如两个请求同时把"待办"改成"进行中"）。
-     * 加了 {@code @Transactional} 后，查询与更新在同一事务内，
-     * 配合数据库的隔离级别可以避免这类竞态；
-     * 同时任何一步异常都会整体回滚，不会出现"状态改了一半"。
+     * <p><b>为什么必须加事务</b>：本方法要「先查当前状态 → 校验是否允许 → 再更新」，
+     * 两步之间若并发改了状态，校验就会失效。加 {@code @Transactional} 后
+     * 查询与更新处于同一事务，任一步异常都整体回滚。
      *
      * @param id     任务 id
      * @param action start / complete / reopen

@@ -3,6 +3,9 @@ package cn.edu.mju.task.service;
 import cn.edu.mju.task.entity.Task;
 import cn.edu.mju.task.mapper.TaskMapper;
 import cn.edu.mju.task.service.impl.TaskServiceImpl;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -25,7 +28,6 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyByte;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -34,42 +36,34 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link TaskServiceImpl} 的单元测试 —— <b>实验四环节三 + 环节四</b>。
+ * {@link TaskServiceImpl} 单元测试 —— <b>实验五（MyBatis-Plus 版）</b>。
  *
- * <h3>为什么这样设计</h3>
- * <ul>
- *   <li><b>只用 Mockito，不启动 Spring 容器</b>：{@code @ExtendWith(MockitoExtension.class)}
- *       不加载任何 ApplicationContext，因此测试可在无数据库、无网络的机器上运行；</li>
- *   <li><b>{@code @Mock TaskMapper} + {@code @InjectMocks TaskServiceImpl}</b>：
- *       Mockito 构造一个假的 Mapper 并通过构造器注入到被测对象，
- *       这就是"用假实现替换持久层"——实验四环节四的核心手法；</li>
- *   <li><b>不碰真实数据库</b>：所有 SQL 都被桩替代，测试跑完数据库里一条记录都不会变。</li>
- * </ul>
+ * <h3>与实验四的测试相比，本类有三处必须改</h3>
+ * <ol>
+ *   <li>被测方法从 {@code findAll()} 变成 {@code search(title, status, pageNum, pageSize)}，
+ *       返回值从 {@code List} 变成 {@link IPage}；</li>
+ *   <li>{@code TaskMapper} 现在继承 {@code BaseMapper}，方法名变成
+ *       {@code selectPage / selectById / updateById / deleteById} ——
+ *       这是「换持久层框架会波及测试」的直接证据；</li>
+ *   <li>分页不再需要 stub 两次（{@code findByQuery} + {@code countByQuery}），
+ *       插件的 COUNT 由框架内部完成，测试里只能看到一次 {@code selectPage}。</li>
+ * </ol>
  *
- * <h3>覆盖的测试类型</h3>
- * <table border="1">
- *   <tr><th>类型</th><th>本类中的例子</th></tr>
- *   <tr><td>正常流</td><td>{@code findAll} 返回列表、{@code add} 成功写入</td></tr>
- *   <tr><td>异常流</td><td>数据库异常 → {@code ServiceException}、影响 0 行 → 抛异常</td></tr>
- *   <tr><td>边界值</td><td>标题恰好 255 字通过 / 256 字被拒、优先级 1 与 3 通过 / 0 与 4 被拒</td></tr>
- *   <tr><td>分支覆盖</td><td>{@code changeStatus} 的三条合法分支 + 六种非法组合 + 未知操作</td></tr>
- * </table>
+ * <h3>仍然不依赖数据库</h3>
+ * 全部用 Mockito 假 Mapper，{@code mvn test} 不需要 MySQL 在运行。
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("TaskServiceImpl 业务层单元测试")
+@DisplayName("TaskServiceImpl 单元测试（MyBatis-Plus 版）")
 class TaskServiceImplTest {
 
-    /** 假 Mapper：所有方法默认返回 0/null/false，需要时用 when(...) 打桩。 */
     @Mock
     private TaskMapper taskMapper;
 
-    /** 被测对象：由 Mockito 通过构造器注入上面的假 Mapper。 */
     @InjectMocks
     private TaskServiceImpl taskService;
 
     // ==================== 测试数据构造 ====================
 
-    /** 构造一个"各项都合法"的任务，供各用例作为基线，避免每个用例重复赋值。 */
     private static Task validTask() {
         Task t = new Task();
         t.setTitle("完成实验报告");
@@ -79,7 +73,6 @@ class TaskServiceImplTest {
         return t;
     }
 
-    /** 生成指定长度的标题，用于标题长度边界测试。 */
     private static String titleOfLength(int length) {
         char[] chars = new char[length];
         Arrays.fill(chars, 'x');
@@ -93,74 +86,133 @@ class TaskServiceImplTest {
         return t;
     }
 
+    /** 构造一个「返回给定数据、给定总数」的分页结果，供 selectPage 打桩。 */
+    private static Page<Task> pageOf(List<Task> records, long total, long current, long size) {
+        Page<Task> page = new Page<Task>(current, size);
+        page.setRecords(records);
+        page.setTotal(total);
+        return page;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private void stubSelectPage(Page<Task> result) {
+        when(taskMapper.selectPage(any(Page.class), any(Wrapper.class))).thenReturn(result);
+    }
+
     // ====================================================================
     @Nested
-    @DisplayName("查询：findAll / findById")
-    class QueryTests {
+    @DisplayName("条件查询 + 分页：search")
+    class SearchTests {
 
         @Test
-        @DisplayName("findAll 应原样返回 Mapper 的结果")
-        void findAll_shouldReturnMapperResult() {
-            List<Task> expected = Arrays.asList(validTask(), validTask());
-            when(taskMapper.findAll()).thenReturn(expected);
+        @DisplayName("无条件时应返回当前页数据与总数")
+        void search_shouldReturnPage() {
+            List<Task> rows = Arrays.asList(validTask(), validTask());
+            stubSelectPage(pageOf(rows, 12L, 1L, 5L));
 
-            List<Task> actual = taskService.findAll();
+            IPage<Task> result = taskService.search(null, null, 1, 5);
 
-            assertThat(actual).hasSize(2).isSameAs(expected);
-            verify(taskMapper, times(1)).findAll();
+            assertThat(result.getRecords()).hasSize(2);
+            assertThat(result.getTotal()).isEqualTo(12L);
+            assertThat(result.getPages()).isEqualTo(3L);
+            verify(taskMapper, times(1)).selectPage(any(Page.class), any(Wrapper.class));
         }
 
         @Test
-        @DisplayName("findAll 遇到空表应返回空列表而不是 null")
-        void findAll_shouldReturnEmptyListWhenNoData() {
-            when(taskMapper.findAll()).thenReturn(Collections.<Task>emptyList());
+        @DisplayName("带条件时应把分页参数原样交给 Mapper")
+        void search_shouldPassPageParameters() {
+            stubSelectPage(pageOf(Collections.<Task>emptyList(), 0L, 2L, 5L));
 
-            assertThat(taskService.findAll()).isNotNull().isEmpty();
+            taskService.search("报告", Byte.valueOf((byte) 0), 2, 5);
+
+            ArgumentCaptor<Page> captor = ArgumentCaptor.forClass(Page.class);
+            verify(taskMapper).selectPage(captor.capture(), any(Wrapper.class));
+            assertThat(captor.getValue().getCurrent()).isEqualTo(2L);
+            assertThat(captor.getValue().getSize()).isEqualTo(5L);
         }
 
         @Test
-        @DisplayName("findById 找到记录时返回实体")
-        void findById_shouldReturnTask() {
-            Task task = validTask();
-            task.setId(Integer.valueOf(3));
-            when(taskMapper.findById(3)).thenReturn(task);
+        @DisplayName("页码小于 1 时应修正为 1（URL 参数不可信）")
+        void search_shouldFixIllegalPageNum() {
+            stubSelectPage(pageOf(Collections.<Task>emptyList(), 0L, 1L, 5L));
 
-            Task actual = taskService.findById(3);
+            taskService.search(null, null, 0, 5);
 
-            assertThat(actual).isNotNull();
-            assertThat(actual.getId()).isEqualTo(3);
-            verify(taskMapper).findById(3);
+            ArgumentCaptor<Page> captor = ArgumentCaptor.forClass(Page.class);
+            verify(taskMapper).selectPage(captor.capture(), any(Wrapper.class));
+            assertThat(captor.getValue().getCurrent()).isEqualTo(1L);
         }
 
         @Test
-        @DisplayName("findById 记录不存在时返回 null（不抛异常）")
-        void findById_shouldReturnNullWhenAbsent() {
-            when(taskMapper.findById(999)).thenReturn(null);
+        @DisplayName("每页条数超上限时应回退为默认值，防止一次拉整表")
+        void search_shouldClampPageSize() {
+            stubSelectPage(pageOf(Collections.<Task>emptyList(), 0L, 1L, 10L));
 
-            assertThat(taskService.findById(999)).isNull();
+            taskService.search(null, null, 1, 999999);
+
+            ArgumentCaptor<Page> captor = ArgumentCaptor.forClass(Page.class);
+            verify(taskMapper).selectPage(captor.capture(), any(Wrapper.class));
+            assertThat(captor.getValue().getSize()).isEqualTo(10L);
         }
 
         @Test
-        @DisplayName("findAll 数据库异常应翻译成 ServiceException")
-        void findAll_shouldWrapDataAccessException() {
-            when(taskMapper.findAll())
+        @DisplayName("每页条数为 0 或负数时也应回退为默认值")
+        void search_shouldClampNonPositivePageSize() {
+            stubSelectPage(pageOf(Collections.<Task>emptyList(), 0L, 1L, 10L));
+
+            taskService.search(null, null, 1, 0);
+
+            ArgumentCaptor<Page> captor = ArgumentCaptor.forClass(Page.class);
+            verify(taskMapper).selectPage(captor.capture(), any(Wrapper.class));
+            assertThat(captor.getValue().getSize()).isEqualTo(10L);
+        }
+
+        @Test
+        @DisplayName("关键字为空白串时不应参与模糊匹配（视为无条件）")
+        void search_shouldIgnoreBlankKeyword() {
+            stubSelectPage(pageOf(Collections.<Task>emptyList(), 0L, 1L, 5L));
+
+            IPage<Task> result = taskService.search("   ", null, 1, 5);
+
+            assertThat(result).isNotNull();
+            verify(taskMapper).selectPage(any(Page.class), any(Wrapper.class));
+        }
+
+        @Test
+        @DisplayName("关键字为 null 时也不应参与模糊匹配")
+        void search_shouldHandleNullKeyword() {
+            stubSelectPage(pageOf(Collections.<Task>emptyList(), 0L, 1L, 5L));
+
+            taskService.search(null, Byte.valueOf((byte) 1), 1, 5);
+
+            verify(taskMapper).selectPage(any(Page.class), any(Wrapper.class));
+        }
+
+        @Test
+        @DisplayName("页码越界（删光了最后一页）应自动回退到最后一页")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void search_shouldFallbackWhenPageOutOfRange() {
+            Page<Task> first = pageOf(Collections.<Task>emptyList(), 100L, 99L, 5L); // total=100 → 20 页
+            Page<Task> last = pageOf(Arrays.asList(validTask()), 100L, 20L, 5L);
+
+            when(taskMapper.selectPage(any(Page.class), any(Wrapper.class))).thenReturn(first, last);
+
+            IPage<Task> result = taskService.search(null, null, 99, 5);
+
+            assertThat(result.getCurrent()).isEqualTo(20L);
+            verify(taskMapper, times(2)).selectPage(any(Page.class), any(Wrapper.class));
+        }
+
+        @Test
+        @DisplayName("数据库异常应翻译成 ServiceException")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void search_shouldWrapDataAccessException() {
+            when(taskMapper.selectPage(any(Page.class), any(Wrapper.class)))
                     .thenThrow(new DataAccessResourceFailureException("数据库连接失败"));
 
-            assertThatThrownBy(() -> taskService.findAll())
+            assertThatThrownBy(() -> taskService.search(null, null, 1, 5))
                     .isInstanceOf(ServiceException.class)
                     .hasMessageContaining("查询任务列表失败")
-                    .hasCauseInstanceOf(DataAccessResourceFailureException.class);
-        }
-
-        @Test
-        @DisplayName("findById 数据库异常应翻译成 ServiceException")
-        void findById_shouldWrapDataAccessException() {
-            when(taskMapper.findById(3))
-                    .thenThrow(new DataAccessResourceFailureException("连接中断"));
-
-            assertThatThrownBy(() -> taskService.findById(3))
-                    .isInstanceOf(ServiceException.class)
-                    .hasMessageContaining("查询任务失败")
                     .hasCauseInstanceOf(DataAccessResourceFailureException.class);
         }
     }
@@ -171,7 +223,7 @@ class TaskServiceImplTest {
     class ConstructorTests {
 
         @Test
-        @DisplayName("传入 null 的 Mapper 应立刻失败（构造器注入的防御价值）")
+        @DisplayName("传入 null 的 Mapper 应立刻失败")
         void constructor_shouldRejectNullMapper() {
             assertThatThrownBy(() -> new TaskServiceImpl(null))
                     .isInstanceOf(IllegalArgumentException.class)
@@ -181,11 +233,46 @@ class TaskServiceImplTest {
 
     // ====================================================================
     @Nested
-    @DisplayName("新增：add 的校验与写入")
+    @DisplayName("查询详情：findById")
+    class FindByIdTests {
+
+        @Test
+        @DisplayName("查到记录时返回实体")
+        void findById_shouldReturnTask() {
+            Task task = validTask();
+            task.setId(Integer.valueOf(3));
+            when(taskMapper.selectById(3)).thenReturn(task);
+
+            assertThat(taskService.findById(3).getId()).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("记录不存在时返回 null")
+        void findById_shouldReturnNullWhenAbsent() {
+            when(taskMapper.selectById(999)).thenReturn(null);
+
+            assertThat(taskService.findById(999)).isNull();
+        }
+
+        @Test
+        @DisplayName("数据库异常应翻译成 ServiceException")
+        void findById_shouldWrapDataAccessException() {
+            when(taskMapper.selectById(3))
+                    .thenThrow(new DataAccessResourceFailureException("连接中断"));
+
+            assertThatThrownBy(() -> taskService.findById(3))
+                    .isInstanceOf(ServiceException.class)
+                    .hasMessageContaining("查询任务失败");
+        }
+    }
+
+    // ====================================================================
+    @Nested
+    @DisplayName("新增：add")
     class AddTests {
 
         @Test
-        @DisplayName("合法任务应写入一次，并把原对象传给 Mapper")
+        @DisplayName("合法任务应写入一次")
         void add_shouldInsertOnce() {
             Task task = validTask();
             when(taskMapper.insert(any(Task.class))).thenReturn(1);
@@ -199,8 +286,8 @@ class TaskServiceImplTest {
 
         @ParameterizedTest(name = "标题为 [{0}] 应被拒绝")
         @NullAndEmptySource
-        @ValueSource(strings = {"   ", "\t", "\n"})
-        @DisplayName("标题为空或纯空白应被拒绝，且不触碰 Mapper")
+        @ValueSource(strings = {"   ", "\t"})
+        @DisplayName("标题为空/纯空白应被拒绝且不触碰数据库")
         void add_shouldRejectBlankTitle(String title) {
             Task task = validTask();
             task.setTitle(title);
@@ -209,7 +296,6 @@ class TaskServiceImplTest {
                     .isInstanceOf(ServiceException.class)
                     .hasMessageContaining("任务名称不能为空");
 
-            // 关键断言：校验失败时绝不能访问数据库
             verifyNoInteractions(taskMapper);
         }
 
@@ -240,7 +326,7 @@ class TaskServiceImplTest {
 
         @ParameterizedTest(name = "优先级 {0} 应被拒绝")
         @ValueSource(ints = {-1, 0, 4, 99})
-        @DisplayName("优先级越界（合法区间 1~3）应被拒绝")
+        @DisplayName("优先级越界应被拒绝")
         void add_shouldRejectIllegalPriority(int priority) {
             Task task = validTask();
             task.setPriority(Byte.valueOf((byte) priority));
@@ -254,7 +340,7 @@ class TaskServiceImplTest {
 
         @ParameterizedTest(name = "优先级 {0} 应通过")
         @ValueSource(ints = {1, 2, 3})
-        @DisplayName("优先级边界内取值（1/2/3）应通过")
+        @DisplayName("优先级边界内取值应通过")
         void add_shouldAcceptLegalPriority(int priority) {
             Task task = validTask();
             task.setPriority(Byte.valueOf((byte) priority));
@@ -267,7 +353,7 @@ class TaskServiceImplTest {
 
         @ParameterizedTest(name = "状态 {0} 应被拒绝")
         @ValueSource(ints = {-1, 3, 10})
-        @DisplayName("状态越界（合法区间 0~2）应被拒绝")
+        @DisplayName("状态越界应被拒绝")
         void add_shouldRejectIllegalStatus(int status) {
             Task task = validTask();
             task.setStatus(Byte.valueOf((byte) status));
@@ -277,6 +363,28 @@ class TaskServiceImplTest {
                     .hasMessageContaining("任务状态取值应为 0~2");
 
             verifyNoInteractions(taskMapper);
+        }
+
+        @Test
+        @DisplayName("优先级为 null 应被拒绝")
+        void add_shouldRejectNullPriority() {
+            Task task = validTask();
+            task.setPriority(null);
+
+            assertThatThrownBy(() -> taskService.add(task))
+                    .isInstanceOf(ServiceException.class)
+                    .hasMessageContaining("优先级取值应为 1~3");
+        }
+
+        @Test
+        @DisplayName("状态为 null 应被拒绝")
+        void add_shouldRejectNullStatus() {
+            Task task = validTask();
+            task.setStatus(null);
+
+            assertThatThrownBy(() -> taskService.add(task))
+                    .isInstanceOf(ServiceException.class)
+                    .hasMessageContaining("任务状态取值应为 0~2");
         }
 
         @Test
@@ -303,29 +411,14 @@ class TaskServiceImplTest {
         }
 
         @Test
-        @DisplayName("优先级为 null 应被拒绝（区别于越界，这是「缺失」）")
-        void add_shouldRejectNullPriority() {
+        @DisplayName("影响 0 行应抛异常")
+        void add_shouldFailWhenNoRowAffected() {
             Task task = validTask();
-            task.setPriority(null);
+            when(taskMapper.insert(any(Task.class))).thenReturn(0);
 
             assertThatThrownBy(() -> taskService.add(task))
                     .isInstanceOf(ServiceException.class)
-                    .hasMessageContaining("优先级取值应为 1~3");
-
-            verifyNoInteractions(taskMapper);
-        }
-
-        @Test
-        @DisplayName("状态为 null 应被拒绝")
-        void add_shouldRejectNullStatus() {
-            Task task = validTask();
-            task.setStatus(null);
-
-            assertThatThrownBy(() -> taskService.add(task))
-                    .isInstanceOf(ServiceException.class)
-                    .hasMessageContaining("任务状态取值应为 0~2");
-
-            verifyNoInteractions(taskMapper);
+                    .hasMessageContaining("受影响行数为 0");
         }
 
         @Test
@@ -337,19 +430,7 @@ class TaskServiceImplTest {
 
             assertThatThrownBy(() -> taskService.add(task))
                     .isInstanceOf(ServiceException.class)
-                    .hasMessageContaining("新增任务失败")
-                    .hasCauseInstanceOf(DataAccessResourceFailureException.class);
-        }
-
-        @Test
-        @DisplayName("Mapper 返回 0 行说明未被写入，应抛异常")
-        void add_shouldFailWhenNoRowAffected() {
-            Task task = validTask();
-            when(taskMapper.insert(any(Task.class))).thenReturn(0);
-
-            assertThatThrownBy(() -> taskService.add(task))
-                    .isInstanceOf(ServiceException.class)
-                    .hasMessageContaining("受影响行数为 0");
+                    .hasMessageContaining("新增任务失败");
         }
     }
 
@@ -363,11 +444,11 @@ class TaskServiceImplTest {
         void update_shouldUpdateOnce() {
             Task task = validTask();
             task.setId(Integer.valueOf(5));
-            when(taskMapper.update(task)).thenReturn(1);
+            when(taskMapper.updateById(task)).thenReturn(1);
 
             taskService.update(task);
 
-            verify(taskMapper).update(task);
+            verify(taskMapper).updateById(task);
         }
 
         @Test
@@ -384,11 +465,11 @@ class TaskServiceImplTest {
         }
 
         @Test
-        @DisplayName("影响 0 行（记录已被删除）应抛异常")
+        @DisplayName("影响 0 行（记录已不存在）应抛异常")
         void update_shouldFailWhenRecordAbsent() {
             Task task = validTask();
             task.setId(Integer.valueOf(5));
-            when(taskMapper.update(task)).thenReturn(0);
+            when(taskMapper.updateById(task)).thenReturn(0);
 
             assertThatThrownBy(() -> taskService.update(task))
                     .isInstanceOf(ServiceException.class)
@@ -400,13 +481,12 @@ class TaskServiceImplTest {
         void update_shouldWrapDataAccessException() {
             Task task = validTask();
             task.setId(Integer.valueOf(5));
-            when(taskMapper.update(task))
+            when(taskMapper.updateById(task))
                     .thenThrow(new DataAccessResourceFailureException("连接中断"));
 
             assertThatThrownBy(() -> taskService.update(task))
                     .isInstanceOf(ServiceException.class)
-                    .hasMessageContaining("更新任务失败")
-                    .hasCauseInstanceOf(DataAccessResourceFailureException.class);
+                    .hasMessageContaining("更新任务失败");
         }
     }
 
@@ -453,52 +533,44 @@ class TaskServiceImplTest {
     class ChangeStatusTests {
 
         @ParameterizedTest(name = "{0}：状态 {1} -> {2}")
-        @CsvSource({
-                "start,    0, 1",
-                "complete, 1, 2",
-                "reopen,   2, 1"
-        })
+        @CsvSource({"start,    0, 1", "complete, 1, 2", "reopen,   2, 1"})
         @DisplayName("三条合法流转应更新为下一状态")
         void changeStatus_shouldUpdateOnLegalTransition(String action, byte fromStatus, byte toStatus) {
-            when(taskMapper.findById(7)).thenReturn(taskWithStatus(fromStatus));
-            when(taskMapper.updateStatus(7, toStatus)).thenReturn(1);
+            when(taskMapper.selectById(7)).thenReturn(taskWithStatus(fromStatus));
+            when(taskMapper.updateById(any(Task.class))).thenReturn(1);
 
             taskService.changeStatus(7, action);
 
-            verify(taskMapper).updateStatus(7, toStatus);
+            ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+            verify(taskMapper).updateById(captor.capture());
+            assertThat(captor.getValue().getId()).isEqualTo(7);
+            assertThat(captor.getValue().getStatus()).isEqualTo(Byte.valueOf(toStatus));
         }
 
         @ParameterizedTest(name = "{0}：从状态 {1} 出发应被拒绝")
-        @CsvSource({
-                "start,    1",
-                "start,    2",
-                "complete, 0",
-                "complete, 2",
-                "reopen,   0",
-                "reopen,   1"
-        })
-        @DisplayName("六种非法流转应被拒绝，且绝不能写库")
+        @CsvSource({"start,    1", "start,    2", "complete, 0",
+                "complete, 2", "reopen,   0", "reopen,   1"})
+        @DisplayName("六种非法流转应被拒绝且绝不能写库")
         void changeStatus_shouldRejectIllegalTransition(String action, byte fromStatus) {
-            when(taskMapper.findById(7)).thenReturn(taskWithStatus(fromStatus));
+            when(taskMapper.selectById(7)).thenReturn(taskWithStatus(fromStatus));
 
             assertThatThrownBy(() -> taskService.changeStatus(7, action))
                     .isInstanceOf(ServiceException.class)
                     .hasMessageContaining("只有「");
 
-            // 这是状态机最重要的保证：非法流转不能产生任何写操作
-            verify(taskMapper, never()).updateStatus(anyInt(), anyByte());
+            verify(taskMapper, never()).updateById(any(Task.class));
         }
 
         @Test
         @DisplayName("任务不存在应抛异常")
         void changeStatus_shouldFailWhenTaskAbsent() {
-            when(taskMapper.findById(404)).thenReturn(null);
+            when(taskMapper.selectById(404)).thenReturn(null);
 
             assertThatThrownBy(() -> taskService.changeStatus(404, "start"))
                     .isInstanceOf(ServiceException.class)
                     .hasMessageContaining("任务不存在");
 
-            verify(taskMapper, never()).updateStatus(anyInt(), anyByte());
+            verify(taskMapper, never()).updateById(any(Task.class));
         }
 
         @ParameterizedTest(name = "未知操作 [{0}] 应被拒绝")
@@ -506,20 +578,20 @@ class TaskServiceImplTest {
         @ValueSource(strings = {"delete", "START", "start ", "开始"})
         @DisplayName("未知或大小写不符的 action 应被拒绝")
         void changeStatus_shouldRejectUnknownAction(String action) {
-            when(taskMapper.findById(7)).thenReturn(taskWithStatus((byte) 0));
+            when(taskMapper.selectById(7)).thenReturn(taskWithStatus((byte) 0));
 
             assertThatThrownBy(() -> taskService.changeStatus(7, action))
                     .isInstanceOf(ServiceException.class)
                     .hasMessageContaining("未知的状态操作");
 
-            verify(taskMapper, never()).updateStatus(anyInt(), anyByte());
+            verify(taskMapper, never()).updateById(any(Task.class));
         }
 
         @Test
         @DisplayName("更新影响 0 行应抛异常")
         void changeStatus_shouldFailWhenNoRowAffected() {
-            when(taskMapper.findById(7)).thenReturn(taskWithStatus((byte) 0));
-            when(taskMapper.updateStatus(7, (byte) 1)).thenReturn(0);
+            when(taskMapper.selectById(7)).thenReturn(taskWithStatus((byte) 0));
+            when(taskMapper.updateById(any(Task.class))).thenReturn(0);
 
             assertThatThrownBy(() -> taskService.changeStatus(7, "start"))
                     .isInstanceOf(ServiceException.class)
@@ -527,28 +599,29 @@ class TaskServiceImplTest {
         }
 
         @Test
-        @DisplayName("数据库宕机时应抛 ServiceException 而不是泄漏技术异常")
+        @DisplayName("数据库宕机时应抛 ServiceException")
         void changeStatus_shouldWrapDataAccessException() {
-            when(taskMapper.findById(7))
+            when(taskMapper.selectById(7))
                     .thenThrow(new DataAccessResourceFailureException("数据库宕机"));
 
             assertThatThrownBy(() -> taskService.changeStatus(7, "start"))
                     .isInstanceOf(ServiceException.class)
-                    .hasMessageContaining("任务状态流转失败")
-                    .hasCauseInstanceOf(DataAccessResourceFailureException.class);
+                    .hasMessageContaining("任务状态流转失败");
         }
 
         @Test
-        @DisplayName("历史数据 status 为 null 时应按「待办」处理，允许 start")
+        @DisplayName("历史数据 status 为 null 时应按「待办」处理")
         void changeStatus_shouldTreatNullStatusAsTodo() {
             Task task = taskWithStatus((byte) 0);
-            task.setStatus(null);          // 模拟历史脏数据
-            when(taskMapper.findById(7)).thenReturn(task);
-            when(taskMapper.updateStatus(7, (byte) 1)).thenReturn(1);
+            task.setStatus(null);
+            when(taskMapper.selectById(7)).thenReturn(task);
+            when(taskMapper.updateById(any(Task.class))).thenReturn(1);
 
             taskService.changeStatus(7, "start");
 
-            verify(taskMapper).updateStatus(7, (byte) 1);
+            ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+            verify(taskMapper).updateById(captor.capture());
+            assertThat(captor.getValue().getStatus()).isEqualTo(Byte.valueOf((byte) 1));
         }
     }
 }

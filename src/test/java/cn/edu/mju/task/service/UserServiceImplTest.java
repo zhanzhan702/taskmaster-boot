@@ -3,6 +3,7 @@ package cn.edu.mju.task.service;
 import cn.edu.mju.task.entity.User;
 import cn.edu.mju.task.mapper.UserMapper;
 import cn.edu.mju.task.service.impl.UserServiceImpl;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -16,6 +17,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -61,14 +63,14 @@ class UserServiceImplTest {
         @Test
         @DisplayName("用户名与密码都正确时应返回用户对象")
         void login_shouldReturnUserWhenCredentialsMatch() {
-            when(userMapper.findByLoginName("admin")).thenReturn(admin());
+            when(userMapper.selectOne(any(Wrapper.class))).thenReturn(admin());
 
             User user = userService.login("admin", "123456");
 
             assertThat(user).isNotNull();
             assertThat(user.getLoginName()).isEqualTo("admin");
             assertThat(user.getNickname()).isEqualTo("管理员");
-            verify(userMapper).findByLoginName("admin");
+            verify(userMapper).selectOne(any(Wrapper.class));
         }
     }
 
@@ -79,23 +81,22 @@ class UserServiceImplTest {
         @Test
         @DisplayName("用户不存在时应返回 null")
         void login_shouldReturnNullWhenUserAbsent() {
-            when(userMapper.findByLoginName("nobody")).thenReturn(null);
-
+            // selectOne 默认返回 null，无需打桩（Mockito 严格模式也不允许无用桩）
             assertThat(userService.login("nobody", "123456")).isNull();
         }
 
         @Test
         @DisplayName("密码错误时应返回 null（且不泄漏「用户存在」这一信息）")
         void login_shouldReturnNullWhenPasswordWrong() {
-            when(userMapper.findByLoginName("admin")).thenReturn(admin());
+            when(userMapper.selectOne(any(Wrapper.class))).thenReturn(admin());
 
             assertThat(userService.login("admin", "wrong-password")).isNull();
         }
 
         @Test
-        @DisplayName("密码大小写敏感：123456 与 123456 之外的一律拒绝")
+        @DisplayName("密码大小写敏感：首尾多空格应拒绝")
         void login_shouldBeCaseSensitiveOnPassword() {
-            when(userMapper.findByLoginName("admin")).thenReturn(admin());
+            when(userMapper.selectOne(any(Wrapper.class))).thenReturn(admin());
 
             assertThat(userService.login("admin", "123456 ")).isNull();
             assertThat(userService.login("admin", " 123456")).isNull();
@@ -133,7 +134,7 @@ class UserServiceImplTest {
         @Test
         @DisplayName("数据库宕机时应抛 ServiceException 而不是泄漏 DataAccessException")
         void login_shouldWrapDataAccessException() {
-            when(userMapper.findByLoginName("admin"))
+            when(userMapper.selectOne(any(Wrapper.class)))
                     .thenThrow(new DataAccessResourceFailureException("数据库宕机"));
 
             assertThatThrownBy(() -> userService.login("admin", "123456"))

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!--
+  公共样式片段。Thymeleaf 的 th:replace 可以把整个片段替换进来，
+  因此各页面不必复制 <style>。实验四的 4 个 JSP 里样式是各写一遍的。
+-->
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <style th:fragment="css">
+        body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 28px; color: #222; }
+        h2 { margin: 0 0 16px; font-size: 20px; }
+        .card { max-width: 560px; padding: 20px 24px; border: 1px solid #e1e4e8; border-radius: 8px; background: #fff; }
+        .field { margin-bottom: 14px; }
+        .field label { display: block; margin-bottom: 4px; font-size: 14px; font-weight: 600; }
+        .field em { color: #c00; font-style: normal; }
+        .field input[type=text], .field input[type=date], .field select { width: 100%; padding: 6px 8px;
+            font-size: 14px; border: 1px solid #d0d7de; border-radius: 4px; box-sizing: border-box; }
+        .field input[type=password] { width: 100%; padding: 6px 8px; font-size: 14px;
+            border: 1px solid #d0d7de; border-radius: 4px; box-sizing: border-box; }
+        .field-error { color: #c00; font-size: 13px; margin: 4px 0 0; }
+        .form-error { color: #c00; background: #fff0f0; border: 1px solid #ffc9c9;
+            padding: 8px 12px; border-radius: 4px; margin-bottom: 14px; }
+        .tip { color: #888; font-size: 12px; margin: 4px 0 0; }
+        .actions { margin-top: 20px; }
+        .actions button { padding: 6px 18px; font-size: 14px; cursor: pointer; }
+        .actions a { margin-left: 12px; font-size: 14px; }
+        .notice { color: #1a7f37; background: #e6f4ea; border: 1px solid #b7e1c5;
+            padding: 8px 12px; border-radius: 4px; margin-bottom: 14px; }
+        .hint { color: #888; font-size: 13px; }
+    </style>
+</head>
+<body>
+</body>
+</html>

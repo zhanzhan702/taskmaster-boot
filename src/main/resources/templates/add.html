@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<!--
+  新增任务页 —— 只负责「套壳」，表单主体来自 fragments/task-form.html。
+  整个文件不到 30 行，而实验四的 add.jsp 有 60 多行（其中 90% 与 edit.jsp 重复）。
+-->
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>新增任务 · TaskMaster</title>
+    <style th:replace="~{fragments/style :: css}"></style>
+</head>
+<body>
+
+<div th:replace="~{fragments/task-form :: taskForm(${form}, '/task/add', '新增任务')}"></div>
+
+</body>
+</html>

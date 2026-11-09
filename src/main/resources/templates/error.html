@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<!--
+  统一错误页 —— 实验五环节四
+  由 GlobalExceptionHandler 渲染，页面只负责展示 status 与 message，
+  堆栈信息一律不进页面（只写服务端日志）。
+-->
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>出错了 · TaskMaster</title>
+    <style>
+        body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 40px; color: #222; }
+        .box { max-width: 560px; padding: 24px 28px; border: 1px solid #ffc9c9; border-radius: 8px; background: #fffafa; }
+        .code { font-size: 44px; font-weight: 700; color: #c00; line-height: 1; }
+        .msg { margin: 14px 0 20px; font-size: 15px; }
+        .back { font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <div class="code" th:text="${status}">500</div>
+    <p class="msg" th:text="${message}">服务器内部错误，请稍后重试或联系管理员</p>
+    <p class="back">
+        <a th:href="@{/task/list}">返回任务列表</a>
+        ｜ <a th:href="@{/login}">重新登录</a>
+    </p>
+    <p style="color:#999;font-size:12px;margin-top:16px;">
+        技术细节已记录到服务端日志，此处不展示（避免泄漏内部实现）。
+    </p>
+</div>
+
+</body>
+</html>
