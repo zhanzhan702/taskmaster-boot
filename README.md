@@ -10,7 +10,7 @@
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-71%20passed-brightgreen)
 ![Coverage](https://img.shields.io/badge/Service%20coverage-100%25-brightgreen)
-![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)
+[![CI](https://github.com/zhanzhan702/taskmaster-boot/actions/workflows/ci.yml/badge.svg)](https://github.com/zhanzhan702/taskmaster-boot/actions/workflows/ci.yml)
 
 ---
 
@@ -260,3 +260,9 @@ taskmaster-boot/
 ## 九、许可
 
 教学演示项目，仅用于课程学习与答辩演示。
+
+---
+
+**仓库**：<https://github.com/zhanzhan702/taskmaster-boot>
+**CI**：<https://github.com/zhanzhan702/taskmaster-boot/actions/workflows/ci.yml>
+**Tag**：`stage5-class01`（实验六交付版）
