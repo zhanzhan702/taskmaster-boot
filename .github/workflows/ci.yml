@@ -56,7 +56,7 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 安装 JDK ${{ matrix.java }}
         # v4 已被官方标记弃用（不再接收更新），升级到 v5
@@ -91,7 +91,7 @@ jobs:
 
       - name: 归档 JaCoCo 报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: jacoco-jdk${{ matrix.java }}
           path: target/site/jacoco
@@ -99,7 +99,7 @@ jobs:
 
       - name: 归档测试报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: surefire-jdk${{ matrix.java }}
           path: target/surefire-reports
@@ -115,7 +115,7 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 安装 JDK 8
         uses: actions/setup-java@v5
@@ -137,7 +137,7 @@ jobs:
           unzip -l target/taskmaster-plus.jar | grep -E 'BOOT-INF/classes/templates/' | head -10
 
       - name: 归档可执行 JAR
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: taskmaster-plus-jar
           path: target/taskmaster-plus.jar
