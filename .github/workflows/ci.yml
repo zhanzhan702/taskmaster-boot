@@ -91,7 +91,7 @@ jobs:
 
       - name: 归档 JaCoCo 报告
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: jacoco-jdk${{ matrix.java }}
           path: target/site/jacoco
@@ -99,7 +99,7 @@ jobs:
 
       - name: 归档测试报告
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: surefire-jdk${{ matrix.java }}
           path: target/surefire-reports
@@ -137,7 +137,7 @@ jobs:
           unzip -l target/taskmaster-plus.jar | grep -E 'BOOT-INF/classes/templates/' | head -10
 
       - name: 归档可执行 JAR
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: taskmaster-plus-jar
           path: target/taskmaster-plus.jar
