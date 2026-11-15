@@ -63,6 +63,16 @@ public class TaskController {
     /** 每页条数（演示用，固定 5 条，便于看到翻页效果）。 */
     private static final int PAGE_SIZE = 5;
 
+    /**
+     * 查询关键字的最大长度。
+     *
+     * <p>【Code Review 修正 №1】原实现对 {@code title} 不限长，
+     * 而它最终会变成 {@code LIKE '%关键字%'}：关键字过长既走不了索引（前置通配符本就无法用索引），
+     * 又会把超长参数塞进 SQL 与日志里。这里截断到 100 字符
+     * —— 因为是「筛选条件」而非「要落库的数据」，静默截断比抛 400 体验更好。
+     */
+    private static final int MAX_KEYWORD_LENGTH = 100;
+
     private final TaskService taskService;
     private final TaskProperties taskProperties;
 
@@ -86,6 +96,9 @@ public class TaskController {
                        Model model) {
 
         String keyword = (title == null) ? "" : title.trim();
+        if (keyword.length() > MAX_KEYWORD_LENGTH) {
+            keyword = keyword.substring(0, MAX_KEYWORD_LENGTH);
+        }
         Byte statusValue = parseStatus(status);
         int pageNum = parsePage(page);
 

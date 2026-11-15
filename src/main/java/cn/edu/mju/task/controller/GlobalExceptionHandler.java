@@ -7,7 +7,6 @@ import org.springframework.ui.Model;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.servlet.NoHandlerFoundException;
 
 import javax.servlet.http.HttpServletResponse;
 
@@ -57,14 +56,19 @@ public class GlobalExceptionHandler {
         return "error";
     }
 
-    /** 找不到处理器，返回 404。 */
-    @ExceptionHandler(NoHandlerFoundException.class)
-    public String handleNotFound(NoHandlerFoundException e, Model model, HttpServletResponse response) {
-        response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-        model.addAttribute("status", 404);
-        model.addAttribute("message", "请求的页面不存在：" + e.getRequestURL());
-        return "error";
-    }
+    /**
+     * 【Code Review 修正 №3】原来这里还有一个 {@code NoHandlerFoundException} 的处理器，
+     * 但它其实是<b>死代码</b>：
+     * <ul>
+     *   <li>Spring Boot 默认 {@code spring.mvc.throw-exception-if-no-handler-found=false}，
+     *       找不到路由时<b>不会</b>抛这个异常，而是交给 {@code BasicErrorController} 返回 JSON；</li>
+     *   <li>若强行打开该开关，还必须同时把 {@code spring.web.resources.add-mappings} 设为 false
+     *       才能真正命中，而那会连 swagger-ui 的静态资源一起关掉。</li>
+     * </ul>
+     * 权衡后决定：删掉这个处理器，让 404 走 Boot 的默认处理。
+     * 这样虽然 404 返回的是 JSON 而非我们的 error.html，但不会为了「一个错误页」牺牲掉静态资源映射。
+     * 结论：<b>能跑的代码不等于有用的代码</b>，没被触发的分支留着只会误导后来的人。
+     */
 
     /** 兜底：未预期的异常返回 500，堆栈只进日志、不进页面。 */
     @ExceptionHandler(Exception.class)

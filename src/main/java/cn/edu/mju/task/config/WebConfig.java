@@ -31,12 +31,19 @@ public class WebConfig implements WebMvcConfigurer {
      * 注册登录拦截器。
      *
      * <p>只拦 {@code /task/**}：登录页 {@code /login} 必须放行，否则会无限重定向。
-     * 与实验三 spring-mvc.xml 中 {@code <mvc:mapping path="/task/**"/>} 等价。
+     *
+     * <p>实验六补充：OpenAPI 文档路径必须一并放行，
+     * 否则访问 {@code /swagger-ui/index.html} 会被重定向到登录页，
+     * 看起来像是「springdoc 没生效」——这是接入文档工具时最常踩的坑。
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(loginInterceptor)
-                .addPathPatterns("/task/**")
-                .excludePathPatterns("/login", "/logout");
+                // /api/** 同样要求登录：虽然它只读，但任务标题属于业务数据，不能匿名拉取。
+                // 代价是 API 调用方必须先 POST /login 拿到会话 Cookie —— 这恰恰说明
+                // 「基于 Session 的认证不适合做对外 API」，正式项目应改用 Token。
+                .addPathPatterns("/task/**", "/api/**")
+                .excludePathPatterns("/login", "/logout",
+                        "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html");
     }
 }

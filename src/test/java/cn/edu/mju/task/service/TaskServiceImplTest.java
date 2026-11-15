@@ -144,15 +144,16 @@ class TaskServiceImplTest {
         }
 
         @Test
-        @DisplayName("每页条数超上限时应回退为默认值，防止一次拉整表")
+        @DisplayName("每页条数超上限时应「夹紧」到上限，而不是回退成别的值")
         void search_shouldClampPageSize() {
-            stubSelectPage(pageOf(Collections.<Task>emptyList(), 0L, 1L, 10L));
+            stubSelectPage(pageOf(Collections.<Task>emptyList(), 0L, 1L, 100L));
 
             taskService.search(null, null, 1, 999999);
 
             ArgumentCaptor<Page> captor = ArgumentCaptor.forClass(Page.class);
             verify(taskMapper).selectPage(captor.capture(), any(Wrapper.class));
-            assertThat(captor.getValue().getSize()).isEqualTo(10L);
+            // Code Review 修正后：越界是夹紧到 100，而不是原来的「回退成 10」
+            assertThat(captor.getValue().getSize()).isEqualTo(100L);
         }
 
         @Test

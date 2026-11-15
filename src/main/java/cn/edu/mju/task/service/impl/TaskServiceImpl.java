@@ -46,6 +46,9 @@ public class TaskServiceImpl implements TaskService {
     /** 每页条数上限，防止 URL 传 pageSize=999999 把整表拉进内存。 */
     private static final int MAX_PAGE_SIZE = 100;
 
+    /** 每页条数默认值（仅在调用方明显传错时兜底）。 */
+    private static final int DEFAULT_PAGE_SIZE = 10;
+
     private final TaskMapper taskMapper;
 
     public TaskServiceImpl(TaskMapper taskMapper) {
@@ -61,8 +64,15 @@ public class TaskServiceImpl implements TaskService {
         if (pageNum < 1) {
             pageNum = 1;
         }
-        if (pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
-            pageSize = 10;
+        // 【Code Review 修正 №2】越界时「就近夹紧」，而不是回退到一个魔法默认值。
+        // 原实现：if (pageSize < 1 || pageSize > MAX) pageSize = 10;
+        // 问题：控制器传的是 5，而这里回退成 10 —— 一旦某天有人传了 101，
+        //       每页条数会从 101 突然变成 10，行为不连续且难以解释。
+        if (pageSize < 1) {
+            pageSize = DEFAULT_PAGE_SIZE;
+        }
+        if (pageSize > MAX_PAGE_SIZE) {
+            pageSize = MAX_PAGE_SIZE;
         }
 
         String keyword = (title == null) ? null : title.trim();

@@ -33,6 +33,13 @@ spring:
   application:
     name: taskmaster-plus
 
+  mvc:
+    pathmatch:
+      # 实验六：springdoc-openapi 1.6.x 与 Spring Boot 2.6+ 默认的 PathPatternParser 存在冲突，
+      # 表现为 /v3/api-docs 返回 200 但 paths 为空（一条接口都扫不到，也不报错）。
+      # 官方给的解法就是切回 AntPathMatcher。
+      matching-strategy: ant_path_matcher
+
   # Thymeleaf：模板默认位于 classpath:/templates/，后缀 .html
   # 因此不需要像 JSP 那样配置 InternalResourceViewResolver
   thymeleaf:
@@ -72,6 +79,20 @@ mybatis-plus:
     map-underscore-to-camel-case: true
     # 让 SQL 可见：开发期排查「MyBatis-Plus 到底替我生成了什么 SQL」全靠它。
     # 注意这是全局强制项，会让 prod 也打印，因此只在 dev profile 生效（见 application-dev.yml）
+
+# 实验六：OpenAPI 文档（springdoc）
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+  # 扫描范围要覆盖到「有对外接口的所有包」。
+  # 曾经写成 cn.edu.mju.task.controller，结果新增的 cn.edu.mju.task.api 被排除在外，
+  # /v3/api-docs 返回 200 但 paths 为空 —— 这种「配了反而更糟」的坑很难从现象反推。
+  packages-to-scan: cn.edu.mju.task
+  paths-to-match: /**
 
 # 业务参数（TaskProperties 绑定，用于在页面显示当前环境）
 task:

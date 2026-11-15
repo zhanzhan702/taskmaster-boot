@@ -36,6 +36,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <mybatis.plus.version>3.5.3.2</mybatis.plus.version>
+    <springdoc.version>1.6.15</springdoc.version>
     <jacoco.version>0.8.11</jacoco.version>
   </properties>
 
@@ -74,6 +75,16 @@
       <scope>runtime</scope>
     </dependency>
 
+    <!-- 实验六环节二：OpenAPI 3 文档自动生成。
+         springdoc 1.6.x 对应 Spring Boot 2.x（2.x 对应 Boot 3 / jakarta，不兼容）。
+         启动后访问 /v3/api-docs 得到 JSON，/swagger-ui/index.html 得到交互式页面，
+         本项目的 docs/API.md 就是由前者导出的。 -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-ui</artifactId>
+      <version>${springdoc.version}</version>
+    </dependency>
+
     <!-- 测试：JUnit 5 + Mockito + AssertJ + Spring Test -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -85,6 +96,17 @@
   <build>
     <finalName>taskmaster-plus</finalName>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <encoding>UTF-8</encoding>
+          <!-- 保留方法参数名：springdoc 生成文档时用它给参数命名，
+               否则参数会显示成 arg0 / arg1 -->
+          <parameters>true</parameters>
+        </configuration>
+      </plugin>
+
       <!-- 打成可执行 jar：java -jar target/taskmaster-plus.jar -->
       <plugin>
         <groupId>org.springframework.boot</groupId>

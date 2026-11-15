@@ -1,0 +1,144 @@
+# ============================================================================
+# TaskMaster 持续集成流水线
+# ============================================================================
+#
+# 设计要点：
+#   1. 触发：push 到 main/master/develop，以及任何指向 main/master 的 PR
+#      —— PR 也跑，才能在「合并前」拦住问题，而不是合并后才发现。
+#   2. 双 JDK 矩阵：本项目目标字节码是 Java 8（Spring Boot 2.7 支持 8~17），
+#      同时用 8 与 17 各跑一遍，证明「源码兼容性」不只是口头承诺。
+#   3. 质量门禁：mvn clean test 失败即整条流水线红，后面的 package 不会执行
+#      （用 needs 建立依赖），杜绝「测试挂了但还是发出了包」。
+#   4. 产物归档：可执行 jar 作为 Artifact 保存 7 天，供部署时下载。
+#   5. concurrency：同一分支的新提交会取消上一轮未完成的运行，省 runner 时间。
+#
+# 为什么不是 JDK 17 单版本？
+#   实验指导里写的是「JDK 17 等」。但本项目从实验二起技术线就是 JDK 8 + javax，
+#   Spring Boot 2.7 恰好同时支持 8 与 17，因此用矩阵覆盖两者，
+#   比硬套一个版本更能说明问题。若将来升级到 Spring Boot 3（要求 17+），
+#   只需把矩阵改成 ['17','21'] 并同步升级依赖。
+# ============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:        # 支持手动触发，便于演示
+
+permissions:
+  contents: read            # 最小权限：CI 只需要读代码
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 1：质量门禁 —— 编译 + 单元测试
+  # --------------------------------------------------------------------------
+  test:
+    name: 质量门禁 (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false      # 一个 JDK 失败不要中断另一个，方便一次看到全部问题
+      matrix:
+        java: ['8', '17']
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      - name: 打印环境信息
+        run: |
+          java -version
+          mvn -version
+
+      # 这一步就是「质量门禁」：任何测试失败都会让 job 失败，
+      # 进而阻断后面的 package job（它 needs: test）。
+      - name: 单元测试 + 覆盖率
+        run: mvn -B clean test
+
+      - name: 覆盖率摘要
+        if: always()
+        run: |
+          CSV=target/site/jacoco/jacoco.csv
+          if [ -f "$CSV" ]; then
+            echo "### 覆盖率（JDK ${{ matrix.java }}）" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            awk -F, 'NR>1 {ic+=$4; im+=$5; bc+=$6; bm+=$7; lc+=$8; lm+=$9} \
+              END {printf "指令 %.1f%%  分支 %.1f%%  行 %.1f%%\n", \
+                  100*ic/(ic+im), 100*bc/(bc+bm), 100*lc/(lc+lm)}' "$CSV" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 归档 JaCoCo 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-jdk${{ matrix.java }}
+          path: target/site/jacoco
+          retention-days: 7
+
+      - name: 归档测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-jdk${{ matrix.java }}
+          path: target/surefire-reports
+          retention-days: 7
+
+  # --------------------------------------------------------------------------
+  # Job 2：构建产物 —— 只有 Job 1 全绿才会执行
+  # --------------------------------------------------------------------------
+  package:
+    name: 构建可执行 JAR
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: maven
+
+      # 测试已在上一个 job 通过，这里只打包，避免重复跑两遍
+      - name: 打包
+        run: mvn -B -DskipTests package
+
+      - name: 校验产物结构
+        run: |
+          ls -lh target/taskmaster-plus.jar
+          echo "--- MANIFEST ---"
+          unzip -p target/taskmaster-plus.jar META-INF/MANIFEST.MF | grep -iE 'Spring-Boot-Version|Main-Class|Start-Class'
+          echo "--- 模板是否打进 jar ---"
+          unzip -l target/taskmaster-plus.jar | grep -E 'BOOT-INF/classes/templates/' | head -10
+
+      - name: 归档可执行 JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskmaster-plus-jar
+          path: target/taskmaster-plus.jar
+          retention-days: 7
+
+      - name: 写入构建摘要
+        run: |
+          SIZE=$(du -h target/taskmaster-plus.jar | cut -f1)
+          echo "### 构建成功" >> $GITHUB_STEP_SUMMARY
+          echo "- 产物：\`taskmaster-plus.jar\`（$SIZE）" >> $GITHUB_STEP_SUMMARY
+          echo "- 运行方式：\`java -jar taskmaster-plus.jar\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 提交：\`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
